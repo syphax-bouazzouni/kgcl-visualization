@@ -66,7 +66,7 @@
     document.getElementById('loading').style.display = 'block';
 
     // Fetch data using the root path
-    fetch('/categories.json')
+    fetch('categories.json')
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
