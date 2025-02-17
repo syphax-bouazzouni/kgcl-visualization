@@ -80,7 +80,7 @@
             // Process the data to convert it to hierarchical format
             const processData = (data) => {
                 // Find the root node (node with null parent)
-                const root = data
+                const root = data.children[0];
 
                 // Function to find children of a node
                 const findChildren = (node) => {
