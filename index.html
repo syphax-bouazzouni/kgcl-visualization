@@ -1,17 +1,253 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <meta charset="utf-8">
+    <title>Collapsible Tree</title>
+    <style>
+        .node circle {
+            fill: #fff;
+            stroke: #4b5563;
+            stroke-width: 1.5px;
+        }
+
+        .node text {
+            font: 12px sans-serif;
+        }
+
+        .link {
+            fill: none;
+            stroke: #ccc;
+            stroke-width: 1.5px;
+        }
+
+        .node circle:hover {
+            stroke: #2563eb;
+            cursor: pointer;
+        }
+
+        #error-message {
+            color: #dc2626;
+            padding: 1rem;
+            margin: 1rem;
+            border: 1px solid #dc2626;
+            border-radius: 4px;
+            display: none;
+        }
+
+        #loading {
+            padding: 1rem;
+            margin: 1rem;
+            display: none;
+        }
+    </style>
 </head>
 <body>
-<h2>Visualization of KGCL</h2>
+<div id="loading">Loading data...</div>
+<div id="error-message"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script>
+    // Set up the dimensions and margins
+    const margin = {top: 20, right: 90, bottom: 20, left: 90};
+    const width = 1200 - margin.left - margin.right;
+    const height = 800 - margin.top - margin.bottom;
 
-<div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.17/d3.min.js"></script>
-    <script src="d3_viz.js"></script>
-    <script src="d3_categories.js"></script>
-</div>
+    // Create the SVG container
+    const svg = d3.select("body")
+        .append("svg")
+        .attr("width", width + margin.left + margin.right)
+        .attr("height", height + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    // Declares a tree layout and assigns the size
+    const treemap = d3.tree().size([height, width]);
+
+    // Show loading indicator
+    document.getElementById('loading').style.display = 'block';
+
+    // Fetch data using the root path
+    fetch('/categories.json')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Hide loading indicator
+            document.getElementById('loading').style.display = 'none';
+
+            // Process the data to convert it to hierarchical format
+            const processData = (data) => {
+                // Find the root node (node with null parent)
+                const root = data
+
+                // Function to find children of a node
+                const findChildren = (node) => {
+                    const children = node.children
+                    return children?.map(child => ({
+                        name: child.name,
+                        children: findChildren(child)
+                    }));
+                };
+
+                // Return the processed tree structure
+                return {
+                    name: root.name,
+                    children: findChildren(root)
+                };
+            };
+
+            // Create the root node
+            const root = d3.hierarchy(processData(data[0]));
+            root.x0 = height / 2;
+            root.y0 = 0;
+
+            // Collapse all nodes initially
+            root.children.forEach(collapse);
+
+            update(root);
+
+            // Collapse function
+            function collapse(d) {
+                if (d.children) {
+                    d._children = d.children;
+                    d._children.forEach(collapse);
+                    d.children = null;
+                }
+            }
+
+            // Update function
+            function update(source) {
+                // Assigns the x and y position for the nodes
+                const treeData = treemap(root);
+
+                // Compute the new tree layout
+                const nodes = treeData.descendants();
+                const links = treeData.descendants().slice(1);
+
+                // Normalize for fixed-depth
+                nodes.forEach(d => {
+                    d.y = d.depth * 180;
+                });
+
+                // Update the nodes
+                const node = svg.selectAll('g.node')
+                    .data(nodes, d => d.id || (d.id = ++i));
+
+                // Enter any new nodes at the parent's previous position
+                const nodeEnter = node.enter().append('g')
+                    .attr('class', 'node')
+                    .attr("transform", d => `translate(${source.y0},${source.x0})`)
+                    .on('click', click);
+
+                // Add Circle for the nodes
+                nodeEnter.append('circle')
+                    .attr('r', 6)
+                    .style("fill", d => d._children ? "#ccc" : "#fff");
+
+                // Add labels for the nodes
+                nodeEnter.append('text')
+                    .attr("dy", ".35em")
+                    .attr("x", d => d.children || d._children ? -13 : 13)
+                    .attr("text-anchor", d => d.children || d._children ? "end" : "start")
+                    .text(d => d.data.name);
+
+                // UPDATE
+                const nodeUpdate = nodeEnter.merge(node);
+
+                // Transition to the proper position for the nodes
+                nodeUpdate.transition()
+                    .duration(750)
+                    .attr("transform", d => `translate(${d.y},${d.x})`);
+
+                // Update the node attributes and style
+                nodeUpdate.select('circle')
+                    .attr('r', 6)
+                    .style("fill", d => d._children ? "#ccc" : "#fff");
+
+                // Remove any exiting nodes
+                const nodeExit = node.exit().transition()
+                    .duration(750)
+                    .attr("transform", d => `translate(${source.y},${source.x})`)
+                    .remove();
+
+                // On exit reduce the node circles size to 0
+                nodeExit.select('circle')
+                    .attr('r', 1e-6);
+
+                // On exit reduce the opacity of text labels
+                nodeExit.select('text')
+                    .style('fill-opacity', 1e-6);
+
+                // Update the links
+                const link = svg.selectAll('path.link')
+                    .data(links, d => d.id);
+
+                // Enter any new links at the parent's previous position
+                const linkEnter = link.enter().insert('path', "g")
+                    .attr("class", "link")
+                    .attr('d', d => {
+                        const o = {x: source.x0, y: source.y0};
+                        return diagonal(o, o);
+                    });
+
+                // UPDATE
+                const linkUpdate = linkEnter.merge(link);
+
+                // Transition back to the parent element position
+                linkUpdate.transition()
+                    .duration(750)
+                    .attr('d', d => diagonal(d, d.parent));
+
+                // Remove any exiting links
+                link.exit().transition()
+                    .duration(750)
+                    .attr('d', d => {
+                        const o = {x: source.x, y: source.y};
+                        return diagonal(o, o);
+                    })
+                    .remove();
+
+                // Store the old positions for transition
+                nodes.forEach(d => {
+                    d.x0 = d.x;
+                    d.y0 = d.y;
+                });
+            }
+
+            // Click function to toggle children
+            function click(event, d) {
+                if (d.children) {
+                    d._children = d.children;
+                    d.children = null;
+                } else {
+                    d.children = d._children;
+                    d._children = null;
+                }
+                update(d);
+            }
+
+            // Creates a curved (diagonal) path from parent to the child nodes
+            function diagonal(s, d) {
+                return `M ${s.y} ${s.x}
+                            C ${(s.y + d.y) / 2} ${s.x},
+                              ${(s.y + d.y) / 2} ${d.x},
+                              ${d.y} ${d.x}`;
+            }
+        })
+        .catch(error => {
+            // Hide loading indicator
+            document.getElementById('loading').style.display = 'none';
+
+            // Show error message
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.style.display = 'block';
+            errorDiv.textContent = `Error loading data: ${error.message}. Make sure /categories.json is accessible.`;
+            console.error("Error loading the JSON file:", error);
+        });
+
+    let i = 0; // Counter for node ids
+</script>
 </body>
 </html>
